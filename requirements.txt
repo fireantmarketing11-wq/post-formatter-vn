@@ -1,0 +1,2 @@
+# Không cần thư viện ngoài; dùng Tkinter có sẵn trong Python chuẩn.
+# Nếu Python của bạn không có tkinter, cài vào (hệ điều hành khác nhau).
