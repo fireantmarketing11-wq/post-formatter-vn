@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 formatter.py
-Cập nhật: phrase-based emphasis, preserve newlines, bullets rule, Vietnamese detection, exceptions list, always output fancy Unicode emphasis that can be copy/pasted to social.
+Cập nhật: phrase-based emphasis, preserve newlines, bullets rule, Vietnamese detection, exceptions list.
+Điều chỉnh: khi một cụm chứa cả token có dấu và không có dấu, sẽ chỉ chuyển các token ASCII không dấu sang fancy unicode (không bỏ qua toàn cụm) — khắc phục trường hợp tiêu đề có mix ASCII + tiếng Việt.
 """
 import re
 from utils import to_unicode_style
@@ -20,7 +21,7 @@ BULLET_SYMBOL = '•\u2060\u2009'
 # helpers
 
 def has_diacritic(s: str) -> bool:
-    # crude check: presence of Vietnamese-specific characters (non-ASCII letters)
+    # crude check: presence of non-ASCII letters (used as indicator for Vietnamese characters)
     for ch in s:
         if ord(ch) > 127:
             return True
@@ -83,7 +84,6 @@ def apply_fancy_phrase(phrase: str, style: str) -> str:
     out = []
     for ch in phrase:
         if 'A' <= ch <= 'Z' or 'a' <= ch <= 'z':
-            # map according to style
             if style == 'bold':
                 out.append(to_unicode_style(ch, 'bold'))
             elif style == 'italic':
@@ -97,18 +97,28 @@ def apply_fancy_phrase(phrase: str, style: str) -> str:
     return ''.join(out)
 
 
-def emphasize_phrase(phrase_tokens, style, exceptions_lower):
-    # phrase_tokens is list of tokens/strings (original substrings)
-    phrase = ''.join(phrase_tokens)
-    # If phrase contains diacritics -> do not convert letters individually; try to wrap using unicode for ascii parts
-    if any(has_diacritic(t) for t in phrase_tokens):
-        # if all tokens are exceptions, allow emphasis by converting ascii parts
-        if any(t.lower() in exceptions_lower for t in phrase_tokens):
-            return apply_fancy_phrase(phrase, style)
-        # otherwise, return phrase unchanged (no markers)
-        return phrase
-    # else safe to convert ascii letters
-    return apply_fancy_phrase(phrase, style)
+def emphasize_phrase(phrase_parts, style, exceptions_lower):
+    """
+    phrase_parts: list of substrings (may include separators).
+    We will apply fancy mapping to tokens without diacritics or tokens listed in exceptions,
+    and leave other tokens (e.g., Vietnamese with diacritics) unchanged.
+    """
+    out = []
+    for part in phrase_parts:
+        # if this substring is a word-like token
+        if LETTER_TOKEN_RE.fullmatch(part):
+            if part.lower() in exceptions_lower:
+                out.append(apply_fancy_phrase(part, style))
+            elif not has_diacritic(part):
+                # ascii-only word (or ascii letters) -> convert
+                out.append(apply_fancy_phrase(part, style))
+            else:
+                # token has diacritics (Vietnamese) -> keep as-is
+                out.append(part)
+        else:
+            # separators/punctuation -> keep
+            out.append(part)
+    return ''.join(out)
 
 
 def find_bullet_indices(lines):
@@ -132,8 +142,6 @@ def find_bullet_indices(lines):
             k += 1
         # require group length >=2
         if len(group) >= 2:
-            # Only bullet the group if there was no blank line between header and first item (we checked)
-            # and header is not part of the group
             for idx in group:
                 to_bullet.add(idx)
     return to_bullet
@@ -145,26 +153,22 @@ def auto_format(text: str, use_bullets: bool = True, footer: str = None, excepti
     exceptions_lower = set([e.lower() for e in exceptions])
 
     # preserve newlines
-    lines_with_endings = []
-    # splitlines(True) keeps line endings
     raw_lines = text.splitlines(True)
-    # Normalize to list of content without endings and remember endings
     contents = []
     endings = []
     for ln in raw_lines:
         if ln.endswith('\r\n'):
-            endings.append('\r\n')
-            contents.append(ln[:-2])
+            endings.append('\r\n'); contents.append(ln[:-2])
         elif ln.endswith('\n'):
-            endings.append('\n')
-            contents.append(ln[:-1])
+            endings.append('\n'); contents.append(ln[:-1])
         else:
-            endings.append('')
-            contents.append(ln)
+            endings.append(''); contents.append(ln)
+
     # detect bullet groups
     bullet_indices = set()
     if use_bullets:
         bullet_indices = find_bullet_indices(contents)
+
     out_lines = []
     # find first non-empty line index as title
     first_idx = None
@@ -172,85 +176,64 @@ def auto_format(text: str, use_bullets: bool = True, footer: str = None, excepti
         if c.strip():
             first_idx = i
             break
+
     for i, content in enumerate(contents):
         is_title = (i == first_idx)
-        # if this line should be bulleted, and it's in a group, replace leading marker and apply bullet
         line = content
         if i in bullet_indices:
-            # replace leading non-alphanumeric up to first alnum
             m = re.match(r"^\s*([^A-Za-z0-9À-ỹ\u00C0-\u024F\u1EA0-\u1EFF]*)(.*)$", line)
             if m:
                 rest = m.group(2)
                 line = BULLET_SYMBOL + ' ' + rest.lstrip()
-        # now process phrase-based emphasis on this line
         parts = SPLIT_RE.findall(line)
-        # parts are alternating word-like and separators
         out_parts = []
         idx = 0
         N = len(parts)
         while idx < N:
             part = parts[idx]
             if LETTER_TOKEN_RE.fullmatch(part):
-                # start building a phrase of consecutive tokens (allow interleaved separators like spaces kept separate)
-                # We'll collect tokens and intervening separators
-                phrase_tokens = [part]
-                sep_tokens = []
+                # collect phrase span
                 j = idx + 1
-                # collect subsequent tokens if they are word-like, allowing separators between
                 while j < N:
                     if parts[j] and LETTER_TOKEN_RE.fullmatch(parts[j]):
-                        phrase_tokens.append(parts[j])
                         j += 1
                     elif parts[j] and not LETTER_TOKEN_RE.fullmatch(parts[j]):
-                        # separator; include if it's a single space or punctuation within phrase
                         sep = parts[j]
-                        # allow space or small punctuation inside phrase
-                        if sep.strip() == '' or re.match(r"^[,.:;&()\-–—–]$", sep.strip()):
-                            sep_tokens.append(sep)
+                        if sep.strip() == '' or re.match(r'^[,.:;&()\-–—–]$', sep.strip()):
                             j += 1
                         else:
                             break
                     else:
                         break
-                # Build full_phrase substrings by interleaving phrase_tokens and sep_tokens accordingly
-                # Simple approach: join parts from idx to j
-                full_phrase = ''.join(parts[idx:j])
-                # Decide whether to emphasize this full_phrase
-                # Check if any token in phrase is candidate
-                tokens_only = LETTER_TOKEN_RE.findall(full_phrase)
+                full_span = parts[idx:j]
+                tokens_only = LETTER_TOKEN_RE.findall(''.join(full_span))
                 candidates = [choose_token_candidate(t, exceptions_lower) for t in tokens_only]
-                # Context: if any token has diacritic or stopword nearby => treat as vietnamese and skip
                 vietnamese_nearby = any(token_is_vietnamese(t) for t in tokens_only)
-                # If any token is exception -> force candidate
                 if any(t.lower() in exceptions_lower for t in tokens_only):
                     candidate_phrase = True
                 else:
                     candidate_phrase = any(candidates)
                     if vietnamese_nearby:
-                        # if any token has diacritic or is stopword, treat phrase as Vietnamese => skip
                         candidate_phrase = False
                 if candidate_phrase:
-                    # choose style: if all upper in phrase -> bold_italic; else if any token has digit or any token starts with upper -> bold/italic
                     if all(is_all_upper(t) for t in tokens_only if t):
                         style = 'bold_italic'
                     elif any(contains_digit(t) for t in tokens_only):
                         style = 'bold'
                     elif any(starts_with_upper(t) for t in tokens_only):
-                        # choose bold if length of phrase letters even else italic
                         total_letters = sum(len([c for c in t if c.isalpha()]) for t in tokens_only)
                         style = 'bold' if total_letters % 2 == 0 else 'italic'
                     else:
                         style = 'bold'
-                    emphasized = emphasize_phrase([p for p in parts[idx:j]], style, exceptions_lower)
+                    emphasized = emphasize_phrase(full_span, style, exceptions_lower)
                     out_parts.append(emphasized)
                 else:
-                    out_parts.append(full_phrase)
+                    out_parts.append(''.join(full_span))
                 idx = j
             else:
                 out_parts.append(part)
                 idx += 1
         out_line = ''.join(out_parts)
-        # append original line ending
         out_lines.append(out_line + endings[i])
     result = ''.join(out_lines)
     if footer:
