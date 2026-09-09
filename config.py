@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 config.py
-Lưu cấu hình đơn giản (footer, include_footer, use_bullets, exceptions) vào config.json trong thư mục project.
+Lưu cấu hình đơn giản (footer, include_footer, use_bullets, exceptions, font_family) vào config.json trong thư mục project.
 """
 import json
 import os
@@ -12,7 +12,8 @@ DEFAULT = {
     'footer': '',
     'include_footer': False,
     'use_bullets': True,
-    'exceptions': []
+    'exceptions': [],
+    'font_family': ''
 }
 
 def load():

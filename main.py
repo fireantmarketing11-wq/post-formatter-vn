@@ -3,15 +3,29 @@
 """
 main.py
 Ứng dụng GUI nhỏ để định dạng bài đăng mạng xã hội tự động.
+Cập nhật: thêm chọn font hiển thị cho Output (để hỗ trợ ký tự Unicode fancy như 𝐭𝐞𝐬𝐭).
 Chạy: python main.py
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import tkinter.font as tkfont
 from formatter import auto_format
 import os
 import config
 
 APP_TITLE = "Trình Định dạng Bài Post (Tiếng Việt)"
+
+# Fonts to thử (tên font trên Windows / hệ thống). Người dùng có thể nhập tên khác trong ô chọn.
+FONT_OPTIONS = [
+    "Cambria Math",
+    "Segoe UI Symbol",
+    "Symbola",
+    "Noto Sans Symbols",
+    "Arial Unicode MS",
+    "DejaVu Sans",
+    "Liberation Sans",
+    "Segoe UI",
+]
 
 
 def load_sample():
@@ -86,8 +100,21 @@ def save_config():
     cfg['use_bullets'] = bool(bullets_var.get())
     exceptions_raw = exceptions_text.get("1.0", tk.END).strip()
     cfg['exceptions'] = [e.strip() for e in exceptions_raw.split(',') if e.strip()]
+    # font
+    cfg['font_family'] = font_var.get()
     config.save(cfg)
-    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình (footer, bullets, exceptions).")
+    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình (footer, bullets, exceptions, font).")
+
+
+def apply_font_selection(event=None):
+    fam = font_var.get()
+    try:
+        f = tkfont.Font(family=fam, size=12)
+        output_text.configure(font=f)
+        # also set input font slightly for consistency
+        input_text.configure(font=tkfont.Font(family=fam, size=12))
+    except Exception:
+        messagebox.showwarning("Font không hợp lệ", f"Không thể áp dụng font: {fam}. Hệ thống sẽ dùng font mặc định.")
 
 
 # GUI
@@ -103,10 +130,16 @@ ttk.Button(toolbar, text="Mở file", command=open_file).pack(side=tk.LEFT, padx
 ttk.Button(toolbar, text="Tải ví dụ", command=load_sample).pack(side=tk.LEFT, padx=4)
 ttk.Button(toolbar, text="Định dạng", command=format_action).pack(side=tk.LEFT, padx=8)
 
-# remove mode/HTML buttons per user request (no HTML needed)
-
+# Save/Copy buttons
 ttk.Button(toolbar, text="Lưu Output", command=save_output).pack(side=tk.RIGHT, padx=4)
 ttk.Button(toolbar, text="Sao chép Output", command=copy_output).pack(side=tk.RIGHT, padx=4)
+
+# Font selection in toolbar
+font_var = tk.StringVar()
+font_combo = ttk.Combobox(toolbar, textvariable=font_var, values=FONT_OPTIONS + ["(custom)"], width=24)
+font_combo.set(FONT_OPTIONS[0])
+font_combo.pack(side=tk.RIGHT, padx=8)
+font_combo.bind("<<ComboboxSelected>>", apply_font_selection)
 
 # Panes
 panes = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
@@ -122,7 +155,7 @@ panes.add(right_frame, weight=1)
 input_text = tk.Text(left_frame, wrap=tk.WORD, font=("Helvetica", 12))
 input_text.pack(fill=tk.BOTH, expand=1, padx=6, pady=6)
 
-# Output text
+# Output text - font will be set after loading config
 output_text = tk.Text(right_frame, wrap=tk.WORD, font=("Helvetica", 12))
 output_text.pack(fill=tk.BOTH, expand=1, padx=6, pady=6)
 
@@ -147,7 +180,7 @@ footer_frame = ttk.Labelframe(root, text="Footer (sẽ được lưu và tải l
 footer_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
 footer_textbox = tk.Text(footer_frame, height=3, wrap=tk.WORD)
 footer_textbox.pack(fill=tk.X, padx=6, pady=6)
-ttk.Button(footer_frame, text="Lưu cấu hình (footer, bullets, exceptions)", command=save_config).pack(side=tk.RIGHT, padx=6, pady=4)
+ttk.Button(footer_frame, text="Lưu cấu hình (footer, bullets, exceptions, font)", command=save_config).pack(side=tk.RIGHT, padx=6, pady=4)
 
 # Load config
 cfg = config.load()
@@ -157,6 +190,16 @@ footer_enable_var.set(1 if cfg.get('include_footer') else 0)
 bullets_var.set(1 if cfg.get('use_bullets', True) else 0)
 exceptions_text.delete("1.0", tk.END)
 exceptions_text.insert("1.0", ', '.join(cfg.get('exceptions', [])))
+font_var.set(cfg.get('font_family', FONT_OPTIONS[0]))
+
+# apply selected font
+try:
+    f = tkfont.Font(family=font_var.get(), size=12)
+    output_text.configure(font=f)
+    input_text.configure(font=tkfont.Font(family=font_var.get(), size=12))
+except Exception:
+    # keep default fonts if requested font not available
+    pass
 
 # Footer hint
 footer = ttk.Label(root, text="Luật định dạng: Tự động chọn các cụm từ quan trọng và chuyển sang ký tự Unicode để copy/paste lên social. Không format từ tiếng Việt có dấu hoặc cụm tiếng Việt.", anchor="w")
