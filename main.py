@@ -11,6 +11,7 @@ from formatter import auto_format, format_to_html
 import os
 import webbrowser
 import tempfile
+import config
 
 APP_TITLE = "Trình Định dạng Bài Post (Tiếng Việt)"
 
@@ -57,7 +58,10 @@ def format_action():
         messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
         return
     mode = mode_var.get()
-    res = auto_format(src, mode=mode)
+    use_bullets = bullets_var.get()
+    include_footer = footer_enable_var.get()
+    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
+    res = auto_format(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
     output_text.delete("1.0", tk.END)
     output_text.insert("1.0", res)
 
@@ -67,7 +71,10 @@ def preview_html():
         messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
         return
     mode = mode_var.get()
-    html = format_to_html(src, mode=mode)
+    use_bullets = bullets_var.get()
+    include_footer = footer_enable_var.get()
+    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
+    html = format_to_html(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
     # write to temp file and open in browser
     fd, path = tempfile.mkstemp(suffix=".html", prefix="postfmt_preview_")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -80,7 +87,10 @@ def export_html():
         messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
         return
     mode = mode_var.get()
-    html = format_to_html(src, mode=mode)
+    use_bullets = bullets_var.get()
+    include_footer = footer_enable_var.get()
+    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
+    html = format_to_html(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
     p = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML","*.html")], title="Lưu HTML")
     if p:
         try:
@@ -90,10 +100,18 @@ def export_html():
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không lưu được file:\n{e}")
 
+def save_footer_config():
+    cfg = config.load()
+    cfg['footer'] = footer_textbox.get("1.0", tk.END).strip()
+    cfg['include_footer'] = bool(footer_enable_var.get())
+    cfg['use_bullets'] = bool(bullets_var.get())
+    config.save(cfg)
+    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình footer và bullets.")
+
 # GUI
 root = tk.Tk()
 root.title(APP_TITLE)
-root.geometry("1000x650")
+root.geometry("1100x700")
 
 # Toolbar frame
 toolbar = ttk.Frame(root)
@@ -112,8 +130,8 @@ mode_combo.pack(side=tk.LEFT)
 ttk.Button(toolbar, text="Xem trước HTML", command=preview_html).pack(side=tk.LEFT, padx=8)
 ttk.Button(toolbar, text="Xuất HTML", command=export_html).pack(side=tk.LEFT, padx=4)
 
-ttk.Button(toolbar, text="Sao chép Output", command=copy_output).pack(side=tk.RIGHT, padx=4)
 ttk.Button(toolbar, text="Lưu Output", command=save_output).pack(side=tk.RIGHT, padx=4)
+ttk.Button(toolbar, text="Sao chép Output", command=copy_output).pack(side=tk.RIGHT, padx=4)
 
 # Panes
 panes = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
@@ -132,6 +150,29 @@ input_text.pack(fill=tk.BOTH, expand=1, padx=6, pady=6)
 # Output text
 output_text = tk.Text(right_frame, wrap=tk.WORD, font=("Helvetica", 12))
 output_text.pack(fill=tk.BOTH, expand=1, padx=6, pady=6)
+
+# Footer / options frame
+opts = ttk.Frame(root)
+opts.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
+
+bullets_var = tk.IntVar(value=1)
+footer_enable_var = tk.IntVar(value=0)
+
+ttk.Checkbutton(opts, text="Thay bullet cho các dòng danh sách (•  )", variable=bullets_var).pack(side=tk.LEFT, padx=8)
+ttk.Checkbutton(opts, text="Thêm footer vào output", variable=footer_enable_var).pack(side=tk.LEFT, padx=8)
+
+footer_frame = ttk.Labelframe(root, text="Footer (sẽ được lưu và tải lại)")
+footer_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
+footer_textbox = tk.Text(footer_frame, height=3, wrap=tk.WORD)
+footer_textbox.pack(fill=tk.X, padx=6, pady=6)
+ttk.Button(footer_frame, text="Lưu cấu hình footer/bullet", command=save_footer_config).pack(side=tk.RIGHT, padx=6, pady=4)
+
+# Load config
+cfg = config.load()
+footer_textbox.delete("1.0", tk.END)
+footer_textbox.insert("1.0", cfg.get('footer',''))
+footer_enable_var.set(1 if cfg.get('include_footer') else 0)
+bullets_var.set(1 if cfg.get('use_bullets', True) else 0)
 
 # Footer hint
 footer = ttk.Label(root, text="Luật định dạng: Tự động chọn từ cần nhấn mạnh. Chọn chế độ Markdown (**) hoặc Fancy (ký tự Unicode). Có thể xem trước và xuất HTML.", anchor="w")
