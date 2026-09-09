@@ -1,19 +1,31 @@
 # -*- coding: utf-8 -*-
 """
 formatter.py
-Cập nhật: giữ nguyên dòng xuống (preserve newlines), hỗ trợ chuyển các dòng danh sách sang bullet '•\u2060\u2009' khi cần,
-heuristic thông minh hơn: không định dạng các từ rất ngắn (<=2) trừ khi viết HOA toàn bộ; nhận diện tiêu đề (dòng tiêu đề đầu tiên) để format mạnh.
-format_to_html giờ bảo toàn xuống dòng (dùng <br>) và hỗ trợ include footer.
+Cập nhật: phrase-based emphasis, preserve newlines, bullets rule, Vietnamese detection, exceptions list, always output fancy Unicode emphasis that can be copy/pasted to social.
 """
 import re
 from utils import to_unicode_style
-import html as _html
 
-LETTER_RE = re.compile(r"([^\W\d_]+)", flags=re.UNICODE)
-TAG_RE = re.compile(r"([#@])([^\s#@]+)", flags=re.UNICODE)
+# minimal Vietnamese stopwords to detect Vietnamese context
+VIET_STOPWORDS = set([
+    'và','là','của','cho','trên','với','các','những','một','như','được','để','khi','vì','đã','vẫn','có','không','bạn','mình','của','từ'
+])
 
-# Bullet symbol: bullet + word-joiner + thin space to approximate "•⁠  ⁠"
+LETTER_TOKEN_RE = re.compile(r"[A-Za-z0-9À-ỹ̀-ỹ]+", flags=re.UNICODE)
+SPLIT_RE = re.compile(r"([A-Za-z0-9À-ỹ̀-ỹ]+|[^A-Za-z0-9À-ỹ̀-ỹ]+)", flags=re.UNICODE)
+
+# bullet symbol
 BULLET_SYMBOL = '•\u2060\u2009'
+
+# helpers
+
+def has_diacritic(s: str) -> bool:
+    # crude check: presence of Vietnamese-specific characters (non-ASCII letters)
+    for ch in s:
+        if ord(ch) > 127:
+            return True
+    return False
+
 
 def is_all_upper(token: str) -> bool:
     letters = [c for c in token if c.isalpha()]
@@ -21,245 +33,228 @@ def is_all_upper(token: str) -> bool:
         return False
     return all(c.upper() == c and c.isalpha() for c in letters)
 
+
 def starts_with_upper(token: str) -> bool:
     for c in token:
         if c.isalpha():
             return c == c.upper()
     return False
 
+
 def contains_digit(token: str) -> bool:
     return any(ch.isdigit() for ch in token)
 
-def choose_style(token: str):
-    # Tránh format các từ quá ngắn trừ khi là ALL UPPER
+
+def token_is_vietnamese(token: str) -> bool:
+    # if has diacritics -> Vietnamese
+    if has_diacritic(token):
+        return True
+    # if token lower in stopwords
+    if token.lower() in VIET_STOPWORDS:
+        return True
+    return False
+
+
+def choose_token_candidate(token: str, exceptions_lower: set):
+    # Determine if token is candidate for emphasis
+    if not token:
+        return False
+    if token.lower() in exceptions_lower:
+        return True
+    if token_is_vietnamese(token):
+        return False
+    # require ascii letter presence
+    if not re.search(r"[A-Za-z]", token):
+        # numbers/symbols maybe; allow if contains digit
+        return contains_digit(token)
+    # skip short tokens
     letters = [c for c in token if c.isalpha()]
-    if is_all_upper(token):
-        return 'bold_italic'
     if len(letters) <= 2:
-        return None
-    if contains_digit(token) or token.endswith('!') or token.endswith('?'):
-        return 'bold'
-    if starts_with_upper(token):
-        if len(letters) <= 3:
-            return 'italic'
-        else:
-            return 'bold' if (len(letters) % 2 == 0) else 'italic'
-    return None
+        return False
+    # candidate if starts with upper or all upper or contains digit
+    if is_all_upper(token) or starts_with_upper(token) or contains_digit(token):
+        return True
+    # otherwise not candidate
+    return False
 
-def apply_markdown(token: str, style: str):
-    if style == 'bold_italic':
-        return f'***{token}***'
-    if style == 'bold':
-        return f'**{token}**'
-    if style == 'italic':
-        return f'*{token}*'
-    return token
 
-def apply_fancy(token: str, style: str):
-    mapped = None
-    try:
-        if style == 'bold':
-            mapped = to_unicode_style(token, 'bold')
-        elif style == 'italic':
-            mapped = to_unicode_style(token, 'italic')
-        elif style == 'bold_italic':
-            mapped = to_unicode_style(token, 'bold_italic')
-    except Exception:
-        mapped = None
-    if mapped and any('A' <= ch <= 'Z' or 'a' <= ch <= 'z' for ch in token):
-        if mapped == token:
-            return apply_markdown(token, style)
-        return mapped
-    else:
-        return apply_markdown(token, style)
-
-def format_line(line: str, mode: str = 'markdown', use_bullets: bool = True, is_title: bool = False) -> str:
-    stripped = line.lstrip()
-    # Detect list-like line (starts with common markers)
-    list_mark = None
-    if stripped.startswith(('-', '*', '•', '◻', '\u2610', '[')) or stripped.startswith('\u25A1'):
-        list_mark = True
-    # Also detect lines that start with an emoji icon (common emoji separated by space)
-    if len(stripped) > 0 and ord(stripped[0]) > 10000:
-        # rough emoji detection: non-ascii high codepoint at start
-        list_mark = True
-    # If use_bullets and looks like list, replace leading marker with BULLET_SYMBOL
-    if use_bullets and list_mark:
-        # remove leading non-alphanumeric until first letter/num
-        m = re.match(r"^\s*([^A-Za-z0-9\u00C0-\u024F\u1EA0-\u1EFF]*)(.*)$", line)
-        if m:
-            rest = m.group(2)
-            line = BULLET_SYMBOL + ' ' + rest.lstrip()
-    # Process words but keep whitespace
-    def repl(m):
-        token = m.group(0)
-        # If this is title line, prefer stronger emphasis for title words
-        if is_title:
-            # If token longer than 2 letters, make bold or bold_italic if all upper
-            if is_all_upper(token):
-                style = 'bold_italic'
+def apply_fancy_phrase(phrase: str, style: str) -> str:
+    # apply unicode mapping to ascii letters only; keep other chars as-is
+    out = []
+    for ch in phrase:
+        if 'A' <= ch <= 'Z' or 'a' <= ch <= 'z':
+            # map according to style
+            if style == 'bold':
+                out.append(to_unicode_style(ch, 'bold'))
+            elif style == 'italic':
+                out.append(to_unicode_style(ch, 'italic'))
+            elif style == 'bold_italic':
+                out.append(to_unicode_style(ch, 'bold_italic'))
             else:
-                letters = [c for c in token if c.isalpha()]
-                if len(letters) <= 2:
-                    return token
-                style = 'bold' if len(letters) > 2 else None
+                out.append(ch)
         else:
-            style = choose_style(token)
-        if style is None:
-            return token
-        return apply_fancy(token, style) if mode == 'fancy' else apply_markdown(token, style)
-    out = re.sub(LETTER_RE, repl, line)
-    return out
+            out.append(ch)
+    return ''.join(out)
 
-def auto_format(text: str, mode: str = 'markdown', use_bullets: bool = True, footer: str = None) -> str:
-    if mode not in ('markdown', 'fancy'):
-        mode = 'markdown'
-    # Preserve original newline structure
-    lines = text.splitlines(True)  # keepends
+
+def emphasize_phrase(phrase_tokens, style, exceptions_lower):
+    # phrase_tokens is list of tokens/strings (original substrings)
+    phrase = ''.join(phrase_tokens)
+    # If phrase contains diacritics -> do not convert letters individually; try to wrap using unicode for ascii parts
+    if any(has_diacritic(t) for t in phrase_tokens):
+        # if all tokens are exceptions, allow emphasis by converting ascii parts
+        if any(t.lower() in exceptions_lower for t in phrase_tokens):
+            return apply_fancy_phrase(phrase, style)
+        # otherwise, return phrase unchanged (no markers)
+        return phrase
+    # else safe to convert ascii letters
+    return apply_fancy_phrase(phrase, style)
+
+
+def find_bullet_indices(lines):
+    # lines: list of raw line strings (without newline endings)
+    to_bullet = set()
+    for i in range(len(lines)):
+        # line i is potential header if non-empty
+        if not lines[i].strip():
+            continue
+        # check immediate next line exists and is non-empty
+        j = i + 1
+        if j >= len(lines):
+            continue
+        if not lines[j].strip():
+            continue
+        # now collect contiguous non-empty lines starting at j
+        k = j
+        group = []
+        while k < len(lines) and lines[k].strip():
+            group.append(k)
+            k += 1
+        # require group length >=2
+        if len(group) >= 2:
+            # Only bullet the group if there was no blank line between header and first item (we checked)
+            # and header is not part of the group
+            for idx in group:
+                to_bullet.add(idx)
+    return to_bullet
+
+
+def auto_format(text: str, use_bullets: bool = True, footer: str = None, exceptions=None) -> str:
+    if exceptions is None:
+        exceptions = []
+    exceptions_lower = set([e.lower() for e in exceptions])
+
+    # preserve newlines
+    lines_with_endings = []
+    # splitlines(True) keeps line endings
+    raw_lines = text.splitlines(True)
+    # Normalize to list of content without endings and remember endings
+    contents = []
+    endings = []
+    for ln in raw_lines:
+        if ln.endswith('\r\n'):
+            endings.append('\r\n')
+            contents.append(ln[:-2])
+        elif ln.endswith('\n'):
+            endings.append('\n')
+            contents.append(ln[:-1])
+        else:
+            endings.append('')
+            contents.append(ln)
+    # detect bullet groups
+    bullet_indices = set()
+    if use_bullets:
+        bullet_indices = find_bullet_indices(contents)
     out_lines = []
-    # find first non-empty line as title
+    # find first non-empty line index as title
     first_idx = None
-    for i, ln in enumerate(lines):
-        if ln.strip():
+    for i, c in enumerate(contents):
+        if c.strip():
             first_idx = i
             break
-    for i, ln in enumerate(lines):
+    for i, content in enumerate(contents):
         is_title = (i == first_idx)
-        # process line (without trailing newline) and re-append newline
-        ending = ''
-        if ln.endswith('\r\n'):
-            ending = '\r\n'
-            content = ln[:-2]
-        elif ln.endswith('\n'):
-            ending = '\n'
-            content = ln[:-1]
-        else:
-            content = ln
-        formatted = format_line(content, mode=mode, use_bullets=use_bullets, is_title=is_title)
-        out_lines.append(formatted + ending)
+        # if this line should be bulleted, and it's in a group, replace leading marker and apply bullet
+        line = content
+        if i in bullet_indices:
+            # replace leading non-alphanumeric up to first alnum
+            m = re.match(r"^\s*([^A-Za-z0-9À-ỹ\u00C0-\u024F\u1EA0-\u1EFF]*)(.*)$", line)
+            if m:
+                rest = m.group(2)
+                line = BULLET_SYMBOL + ' ' + rest.lstrip()
+        # now process phrase-based emphasis on this line
+        parts = SPLIT_RE.findall(line)
+        # parts are alternating word-like and separators
+        out_parts = []
+        idx = 0
+        N = len(parts)
+        while idx < N:
+            part = parts[idx]
+            if LETTER_TOKEN_RE.fullmatch(part):
+                # start building a phrase of consecutive tokens (allow interleaved separators like spaces kept separate)
+                # We'll collect tokens and intervening separators
+                phrase_tokens = [part]
+                sep_tokens = []
+                j = idx + 1
+                # collect subsequent tokens if they are word-like, allowing separators between
+                while j < N:
+                    if parts[j] and LETTER_TOKEN_RE.fullmatch(parts[j]):
+                        phrase_tokens.append(parts[j])
+                        j += 1
+                    elif parts[j] and not LETTER_TOKEN_RE.fullmatch(parts[j]):
+                        # separator; include if it's a single space or punctuation within phrase
+                        sep = parts[j]
+                        # allow space or small punctuation inside phrase
+                        if sep.strip() == '' or re.match(r"^[,.:;&()\-–—–]$", sep.strip()):
+                            sep_tokens.append(sep)
+                            j += 1
+                        else:
+                            break
+                    else:
+                        break
+                # Build full_phrase substrings by interleaving phrase_tokens and sep_tokens accordingly
+                # Simple approach: join parts from idx to j
+                full_phrase = ''.join(parts[idx:j])
+                # Decide whether to emphasize this full_phrase
+                # Check if any token in phrase is candidate
+                tokens_only = LETTER_TOKEN_RE.findall(full_phrase)
+                candidates = [choose_token_candidate(t, exceptions_lower) for t in tokens_only]
+                # Context: if any token has diacritic or stopword nearby => treat as vietnamese and skip
+                vietnamese_nearby = any(token_is_vietnamese(t) for t in tokens_only)
+                # If any token is exception -> force candidate
+                if any(t.lower() in exceptions_lower for t in tokens_only):
+                    candidate_phrase = True
+                else:
+                    candidate_phrase = any(candidates)
+                    if vietnamese_nearby:
+                        # if any token has diacritic or is stopword, treat phrase as Vietnamese => skip
+                        candidate_phrase = False
+                if candidate_phrase:
+                    # choose style: if all upper in phrase -> bold_italic; else if any token has digit or any token starts with upper -> bold/italic
+                    if all(is_all_upper(t) for t in tokens_only if t):
+                        style = 'bold_italic'
+                    elif any(contains_digit(t) for t in tokens_only):
+                        style = 'bold'
+                    elif any(starts_with_upper(t) for t in tokens_only):
+                        # choose bold if length of phrase letters even else italic
+                        total_letters = sum(len([c for c in t if c.isalpha()]) for t in tokens_only)
+                        style = 'bold' if total_letters % 2 == 0 else 'italic'
+                    else:
+                        style = 'bold'
+                    emphasized = emphasize_phrase([p for p in parts[idx:j]], style, exceptions_lower)
+                    out_parts.append(emphasized)
+                else:
+                    out_parts.append(full_phrase)
+                idx = j
+            else:
+                out_parts.append(part)
+                idx += 1
+        out_line = ''.join(out_parts)
+        # append original line ending
+        out_lines.append(out_line + endings[i])
     result = ''.join(out_lines)
     if footer:
         if not result.endswith('\n'):
             result += '\n'
         result += '\n' + footer
     return result
-
-# HTML conversion
-
-def _wrap_html(token: str, style: str, extra_class: str = None) -> str:
-    content = _html.escape(token)
-    open_tags = []
-    close_tags = []
-    if style == 'bold_italic':
-        open_tags.extend(['<strong>', '<em>'])
-        close_tags.extend(['</em>', '</strong>'])
-    elif style == 'bold':
-        open_tags.append('<strong>')
-        close_tags.append('</strong>')
-    elif style == 'italic':
-        open_tags.append('<em>')
-        close_tags.append('</em>')
-    inner = ''.join(open_tags) + content + ''.join(close_tags)
-    if extra_class:
-        return f'<span class="{extra_class}">{inner}</span>'
-    return inner
-
-def format_to_html(text: str, mode: str = 'markdown', use_bullets: bool = True, footer: str = None) -> str:
-    # handle tags
-    def tag_repl(m):
-        sign = _html.escape(m.group(1))
-        token = m.group(2)
-        style = choose_style(token)
-        cls = 'hashtag' if sign == '#' else 'mention'
-        inner_token = sign + token
-        if mode == 'fancy':
-            try:
-                if style == 'bold':
-                    mapped = to_unicode_style(token, 'bold')
-                elif style == 'italic':
-                    mapped = to_unicode_style(token, 'italic')
-                elif style == 'bold_italic':
-                    mapped = to_unicode_style(token, 'bold_italic')
-                else:
-                    mapped = None
-            except Exception:
-                mapped = None
-            if mapped and any('A' <= ch <= 'Z' or 'a' <= ch <= 'z' for ch in token):
-                inner = _html.escape(sign) + mapped
-                if style == 'bold_italic':
-                    inner = '<strong><em>' + inner + '</em></strong>'
-                elif style == 'bold':
-                    inner = '<strong>' + inner + '</strong>'
-                elif style == 'italic':
-                    inner = '<em>' + inner + '</em>'
-                return '<span class="' + cls + '">' + inner + '</span>'
-        return _wrap_html(inner_token, style, extra_class=cls)
-
-    step1 = re.sub(TAG_RE, tag_repl, text)
-
-    # Process lines and preserve breaks using <br>
-    lines = step1.splitlines(True)
-    processed_lines = []
-    # find title index
-    first_idx = None
-    for i, ln in enumerate(lines):
-        if ln.strip():
-            first_idx = i
-            break
-    for i, ln in enumerate(lines):
-        is_title = (i == first_idx)
-        content = ln.rstrip('\r\n')
-        # handle bullets replacement (same as auto_format)
-        if use_bullets:
-            stripped = content.lstrip()
-            if stripped.startswith(('-', '*', '•', '◻') ) or (len(stripped) > 0 and ord(stripped[0]) > 10000):
-                m = re.match(r"^\s*([^A-Za-z0-9\u00C0-\u024F\u1EA0-\u1EFF]*)(.*)$", content)
-                if m:
-                    rest = m.group(2)
-                    content = BULLET_SYMBOL + ' ' + _html.escape(rest.lstrip())
-        # process remaining word tokens
-        def letter_repl(m):
-            token = m.group(0)
-            style = choose_style(token) if not is_title else ('bold_italic' if is_all_upper(token) else ('bold' if len([c for c in token if c.isalpha()])>2 else None))
-            if style is None:
-                return _html.escape(token)
-            inner = _wrap_html(token, style)
-            return inner
-        processed = re.sub(LETTER_RE, letter_repl, content)
-        # replace line breaks with <br>
-        processed_lines.append(processed + '<br>')
-    body = '\n'.join(processed_lines)
-    if footer:
-        body += '\n<br>\n' + _html.escape(footer)
-
-    html = (
-        "<!doctype html>\n"
-        "<html lang=\"vi\">\n"
-        "<head>\n"
-        "<meta charset=\"utf-8\">\n"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-        "<title>Preview - Trình Định dạng Bài Post</title>\n"
-        "<style>\n"
-        "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 24px; line-height:1.6; color:#111 }\n"
-        ".hashtag { color: #1da1f2; font-weight:600 }\n"
-        ".mention { color: #16a34a }\n"
-        "strong { font-weight:700 }\n"
-        "em { font-style: italic }\n"
-        ".container { max-width:780px }\n"
-        ".copy-btn { position: fixed; right: 18px; top: 18px; padding:8px 12px; background:#111; color:#fff; border-radius:6px; cursor:pointer }\n"
-        "</style>\n"
-        "</head>\n"
-        "<body>\n"
-        "<div class=\"container\">\n"
-        + body +
-        "\n</div>\n"
-        "<script>\n"
-        "function copyText(){\n"
-        "  const t = document.body.innerText;\n"
-        "  navigator.clipboard.writeText(t).then(()=>alert('Đã sao chép nội dung (text)'));\n"
-        "}\n"
-        "</script>\n"
-        "</body>\n"
-        "</html>"
-    )
-    return html

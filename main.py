@@ -7,13 +7,12 @@ Chạy: python main.py
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from formatter import auto_format, format_to_html
+from formatter import auto_format
 import os
-import webbrowser
-import tempfile
 import config
 
 APP_TITLE = "Trình Định dạng Bài Post (Tiếng Việt)"
+
 
 def load_sample():
     path = os.path.join(os.path.dirname(__file__), "sample_input.txt")
@@ -24,6 +23,7 @@ def load_sample():
         input_text.insert("1.0", txt)
     except Exception as e:
         messagebox.showerror("Lỗi", f"Không mở được file mẫu:\n{e}")
+
 
 def open_file():
     p = filedialog.askopenfilename(title="Chọn file văn bản", filetypes=[("Text","*.txt"),("All files","*.*")])
@@ -36,6 +36,7 @@ def open_file():
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không mở được file:\n{e}")
 
+
 def save_output():
     p = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text","*.txt")], title="Lưu kết quả ra file")
     if p:
@@ -46,72 +47,53 @@ def save_output():
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không lưu được file:\n{e}")
 
+
 def copy_output():
     o = output_text.get("1.0", tk.END).rstrip()
     root.clipboard_clear()
     root.clipboard_append(o)
     messagebox.showinfo("Sao chép", "Đã sao chép phần Output vào clipboard.")
 
+
 def format_action():
-    src = input_text.get("1.0", tk.END).strip()
-    if not src:
-        messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
-        return
-    mode = mode_var.get()
-    use_bullets = bullets_var.get()
-    include_footer = footer_enable_var.get()
-    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
-    res = auto_format(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
-    output_text.delete("1.0", tk.END)
-    output_text.insert("1.0", res)
+    try:
+        src = input_text.get("1.0", tk.END)
+        if not src.strip():
+            messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
+            return
+        use_bullets = bool(bullets_var.get())
+        include_footer = bool(footer_enable_var.get())
+        footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
+        exceptions_raw = exceptions_text.get("1.0", tk.END).strip()
+        exceptions = [e.strip() for e in exceptions_raw.split(',') if e.strip()]
+        # ensure output widget editable
+        output_text.config(state="normal")
+        output_text.delete("1.0", tk.END)
+        res = auto_format(src, use_bullets=use_bullets, footer=footer_text, exceptions=exceptions)
+        output_text.insert("1.0", res)
+        # leave output editable for easy copy/paste
+    except Exception as e:
+        import traceback, sys
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        messagebox.showerror("Lỗi khi định dạng", f"Đã xảy ra lỗi, xem terminal/console.\n{e}")
 
-def preview_html():
-    src = input_text.get("1.0", tk.END).strip()
-    if not src:
-        messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
-        return
-    mode = mode_var.get()
-    use_bullets = bullets_var.get()
-    include_footer = footer_enable_var.get()
-    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
-    html = format_to_html(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
-    # write to temp file and open in browser
-    fd, path = tempfile.mkstemp(suffix=".html", prefix="postfmt_preview_")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(html)
-    webbrowser.open(f"file://{path}")
 
-def export_html():
-    src = input_text.get("1.0", tk.END).strip()
-    if not src:
-        messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
-        return
-    mode = mode_var.get()
-    use_bullets = bullets_var.get()
-    include_footer = footer_enable_var.get()
-    footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
-    html = format_to_html(src, mode=mode, use_bullets=use_bullets, footer=footer_text)
-    p = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML","*.html")], title="Lưu HTML")
-    if p:
-        try:
-            with open(p, "w", encoding="utf-8") as f:
-                f.write(html)
-            messagebox.showinfo("Đã lưu", f"Đã lưu HTML vào:\n{p}")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không lưu được file:\n{e}")
-
-def save_footer_config():
+def save_config():
     cfg = config.load()
     cfg['footer'] = footer_textbox.get("1.0", tk.END).strip()
     cfg['include_footer'] = bool(footer_enable_var.get())
     cfg['use_bullets'] = bool(bullets_var.get())
+    exceptions_raw = exceptions_text.get("1.0", tk.END).strip()
+    cfg['exceptions'] = [e.strip() for e in exceptions_raw.split(',') if e.strip()]
     config.save(cfg)
-    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình footer và bullets.")
+    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình (footer, bullets, exceptions).")
+
 
 # GUI
 root = tk.Tk()
 root.title(APP_TITLE)
-root.geometry("1100x700")
+root.geometry("1100x740")
 
 # Toolbar frame
 toolbar = ttk.Frame(root)
@@ -121,14 +103,7 @@ ttk.Button(toolbar, text="Mở file", command=open_file).pack(side=tk.LEFT, padx
 ttk.Button(toolbar, text="Tải ví dụ", command=load_sample).pack(side=tk.LEFT, padx=4)
 ttk.Button(toolbar, text="Định dạng", command=format_action).pack(side=tk.LEFT, padx=8)
 
-mode_var = tk.StringVar(value="markdown")
-ttk.Label(toolbar, text="Chế độ:").pack(side=tk.LEFT, padx=(12,4))
-mode_combo = ttk.Combobox(toolbar, textvariable=mode_var, values=["markdown", "fancy"], width=10, state="readonly")
-mode_combo.pack(side=tk.LEFT)
-
-# HTML preview/export buttons
-ttk.Button(toolbar, text="Xem trước HTML", command=preview_html).pack(side=tk.LEFT, padx=8)
-ttk.Button(toolbar, text="Xuất HTML", command=export_html).pack(side=tk.LEFT, padx=4)
+# remove mode/HTML buttons per user request (no HTML needed)
 
 ttk.Button(toolbar, text="Lưu Output", command=save_output).pack(side=tk.RIGHT, padx=4)
 ttk.Button(toolbar, text="Sao chép Output", command=copy_output).pack(side=tk.RIGHT, padx=4)
@@ -161,11 +136,18 @@ footer_enable_var = tk.IntVar(value=0)
 ttk.Checkbutton(opts, text="Thay bullet cho các dòng danh sách (•  )", variable=bullets_var).pack(side=tk.LEFT, padx=8)
 ttk.Checkbutton(opts, text="Thêm footer vào output", variable=footer_enable_var).pack(side=tk.LEFT, padx=8)
 
+# Exceptions area
+exceptions_frame = ttk.Labelframe(root, text="Exceptions (từ/cụm không muốn để tool bỏ qua) - phân tách bằng dấu phẩy")
+exceptions_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
+exceptions_text = tk.Text(exceptions_frame, height=2, wrap=tk.WORD)
+exceptions_text.pack(fill=tk.X, padx=6, pady=6)
+
+# Footer frame
 footer_frame = ttk.Labelframe(root, text="Footer (sẽ được lưu và tải lại)")
 footer_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
 footer_textbox = tk.Text(footer_frame, height=3, wrap=tk.WORD)
 footer_textbox.pack(fill=tk.X, padx=6, pady=6)
-ttk.Button(footer_frame, text="Lưu cấu hình footer/bullet", command=save_footer_config).pack(side=tk.RIGHT, padx=6, pady=4)
+ttk.Button(footer_frame, text="Lưu cấu hình (footer, bullets, exceptions)", command=save_config).pack(side=tk.RIGHT, padx=6, pady=4)
 
 # Load config
 cfg = config.load()
@@ -173,9 +155,11 @@ footer_textbox.delete("1.0", tk.END)
 footer_textbox.insert("1.0", cfg.get('footer',''))
 footer_enable_var.set(1 if cfg.get('include_footer') else 0)
 bullets_var.set(1 if cfg.get('use_bullets', True) else 0)
+exceptions_text.delete("1.0", tk.END)
+exceptions_text.insert("1.0", ', '.join(cfg.get('exceptions', [])))
 
 # Footer hint
-footer = ttk.Label(root, text="Luật định dạng: Tự động chọn từ cần nhấn mạnh. Chọn chế độ Markdown (**) hoặc Fancy (ký tự Unicode). Có thể xem trước và xuất HTML.", anchor="w")
+footer = ttk.Label(root, text="Luật định dạng: Tự động chọn các cụm từ quan trọng và chuyển sang ký tự Unicode để copy/paste lên social. Không format từ tiếng Việt có dấu hoặc cụm tiếng Việt.", anchor="w")
 footer.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=4)
 
 # Load example by default
