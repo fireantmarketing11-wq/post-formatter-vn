@@ -7,8 +7,10 @@ Chạy: python main.py
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from formatter import auto_format
+from formatter import auto_format, format_to_html
 import os
+import webbrowser
+import tempfile
 
 APP_TITLE = "Trình Định dạng Bài Post (Tiếng Việt)"
 
@@ -59,10 +61,39 @@ def format_action():
     output_text.delete("1.0", tk.END)
     output_text.insert("1.0", res)
 
+def preview_html():
+    src = input_text.get("1.0", tk.END).strip()
+    if not src:
+        messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
+        return
+    mode = mode_var.get()
+    html = format_to_html(src, mode=mode)
+    # write to temp file and open in browser
+    fd, path = tempfile.mkstemp(suffix=".html", prefix="postfmt_preview_")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(html)
+    webbrowser.open(f"file://{path}")
+
+def export_html():
+    src = input_text.get("1.0", tk.END).strip()
+    if not src:
+        messagebox.showwarning("Chưa có nội dung", "Vui lòng nhập hoặc dán nội dung vào ô Input.")
+        return
+    mode = mode_var.get()
+    html = format_to_html(src, mode=mode)
+    p = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML","*.html")], title="Lưu HTML")
+    if p:
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(html)
+            messagebox.showinfo("Đã lưu", f"Đã lưu HTML vào:\n{p}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không lưu được file:\n{e}")
+
 # GUI
 root = tk.Tk()
 root.title(APP_TITLE)
-root.geometry("900x600")
+root.geometry("1000x650")
 
 # Toolbar frame
 toolbar = ttk.Frame(root)
@@ -76,6 +107,10 @@ mode_var = tk.StringVar(value="markdown")
 ttk.Label(toolbar, text="Chế độ:").pack(side=tk.LEFT, padx=(12,4))
 mode_combo = ttk.Combobox(toolbar, textvariable=mode_var, values=["markdown", "fancy"], width=10, state="readonly")
 mode_combo.pack(side=tk.LEFT)
+
+# HTML preview/export buttons
+ttk.Button(toolbar, text="Xem trước HTML", command=preview_html).pack(side=tk.LEFT, padx=8)
+ttk.Button(toolbar, text="Xuất HTML", command=export_html).pack(side=tk.LEFT, padx=4)
 
 ttk.Button(toolbar, text="Sao chép Output", command=copy_output).pack(side=tk.RIGHT, padx=4)
 ttk.Button(toolbar, text="Lưu Output", command=save_output).pack(side=tk.RIGHT, padx=4)
@@ -99,7 +134,7 @@ output_text = tk.Text(right_frame, wrap=tk.WORD, font=("Helvetica", 12))
 output_text.pack(fill=tk.BOTH, expand=1, padx=6, pady=6)
 
 # Footer hint
-footer = ttk.Label(root, text="Luật định dạng: Tự động chọn từ cần nhấn mạnh. Chọn chế độ Markdown (**) hoặc Fancy (ký tự Unicode).", anchor="w")
+footer = ttk.Label(root, text="Luật định dạng: Tự động chọn từ cần nhấn mạnh. Chọn chế độ Markdown (**) hoặc Fancy (ký tự Unicode). Có thể xem trước và xuất HTML.", anchor="w")
 footer.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=4)
 
 # Load example by default
