@@ -141,12 +141,12 @@ def format_to_html(text: str, mode: str = 'markdown') -> str:
             if mapped and any('A' <= ch <= 'Z' or 'a' <= ch <= 'z' for ch in token):
                 inner = _html.escape(sign) + mapped
                 if style == 'bold_italic':
-                    inner = f'<strong><em>{inner}</em></strong>'
+                    inner = '<strong><em>' + inner + '</em></strong>'
                 elif style == 'bold':
-                    inner = f'<strong>{inner}</strong>'
+                    inner = '<strong>' + inner + '</strong>'
                 elif style == 'italic':
-                    inner = f'<em>{inner}</em>'
-                return f'<span class="{cls}">{inner}</span>'
+                    inner = '<em>' + inner + '</em>'
+                return '<span class="' + cls + '">' + inner + '</span>'
         # fallback or markdown mode
         return _wrap_html(inner_token, style, extra_class=cls)
 
@@ -162,32 +162,35 @@ def format_to_html(text: str, mode: str = 'markdown') -> str:
 
     body = re.sub(LETTER_RE, letter_repl, step1)
 
-    html = f'''<!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Preview - Trình Định dạng Bài Post</title>
-<style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 24px; line-height:1.6; color:#111 }}
-.hashtag {{ color: #1da1f2; font-weight:600 }}
-.mention {{ color: #16a34a }}
-strong {{ font-weight:700 }}
-em {{ font-style: italic }}
-.container {{ max-width:780px }}
-.copy-btn {{ position: fixed; right: 18px; top: 18px; padding:8px 12px; background:#111; color:#fff; border-radius:6px; cursor:pointer }}
-</style>
-</head>
-<body>
-<div class="container">
-{body}
-</div>
-<script>
-function copyText(){
-  const t = document.body.innerText;
-  navigator.clipboard.writeText(t).then(()=>alert('Đã sao chép nội dung (text)'));
-}
-</script>
-</body>
-</html>'''
+    # Build HTML using normal strings (NOT f-strings) so { } in CSS/JS are safe
+    html = (
+        "<!doctype html>\n"
+        "<html lang=\"vi\">\n"
+        "<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+        "<title>Preview - Trình Định dạng Bài Post</title>\n"
+        "<style>\n"
+        "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 24px; line-height:1.6; color:#111 }\n"
+        ".hashtag { color: #1da1f2; font-weight:600 }\n"
+        ".mention { color: #16a34a }\n"
+        "strong { font-weight:700 }\n"
+        "em { font-style: italic }\n"
+        ".container { max-width:780px }\n"
+        ".copy-btn { position: fixed; right: 18px; top: 18px; padding:8px 12px; background:#111; color:#fff; border-radius:6px; cursor:pointer }\n"
+        "</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<div class=\"container\">\n"
+        + body +
+        "\n</div>\n"
+        "<script>\n"
+        "function copyText(){\n"
+        "  const t = document.body.innerText;\n"
+        "  navigator.clipboard.writeText(t).then(()=>alert('Đã sao chép nội dung (text)'));\n"
+        "}\n"
+        "</script>\n"
+        "</body>\n"
+        "</html>"
+    )
     return html
