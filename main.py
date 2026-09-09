@@ -3,7 +3,7 @@
 """
 main.py
 Ứng dụng GUI nhỏ để định dạng bài đăng mạng xã hội tự động.
-Phiên bản: UI đã bỏ lựa chọn font (user yêu cầu), giữ các chức năng: Input, Output, Định dạng, Exceptions, Footer, Bullets.
+Cập nhật: thêm checkbox "Format số / ngày / chỉ số" (mặc định ON). Lưu tùy chọn vào config.
 Chạy: python main.py
 """
 import tkinter as tk
@@ -67,12 +67,11 @@ def format_action():
         footer_text = footer_textbox.get("1.0", tk.END).strip() if include_footer else None
         exceptions_raw = exceptions_text.get("1.0", tk.END).strip()
         exceptions = [e.strip() for e in exceptions_raw.split(',') if e.strip()]
-        # ensure output widget editable
+        format_specials = bool(special_var.get())
         output_text.config(state="normal")
         output_text.delete("1.0", tk.END)
-        res = auto_format(src, use_bullets=use_bullets, footer=footer_text, exceptions=exceptions)
+        res = auto_format(src, use_bullets=use_bullets, footer=footer_text, exceptions=exceptions, format_specials=format_specials, style='bold')
         output_text.insert("1.0", res)
-        # leave output editable for easy copy/paste
     except Exception as e:
         import traceback, sys
         tb = traceback.format_exc()
@@ -87,8 +86,9 @@ def save_config():
     cfg['use_bullets'] = bool(bullets_var.get())
     exceptions_raw = exceptions_text.get("1.0", tk.END).strip()
     cfg['exceptions'] = [e.strip() for e in exceptions_raw.split(',') if e.strip()]
+    cfg['format_specials'] = bool(special_var.get())
     config.save(cfg)
-    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình (footer, bullets, exceptions).")
+    messagebox.showinfo("Đã lưu", "Đã lưu cấu hình (footer, bullets, exceptions, format_specials).")
 
 
 # GUI
@@ -132,9 +132,11 @@ opts.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=6)
 
 bullets_var = tk.IntVar(value=1)
 footer_enable_var = tk.IntVar(value=0)
+special_var = tk.IntVar(value=1)
 
 ttk.Checkbutton(opts, text="Thay bullet cho các dòng danh sách (•  )", variable=bullets_var).pack(side=tk.LEFT, padx=8)
 ttk.Checkbutton(opts, text="Thêm footer vào output", variable=footer_enable_var).pack(side=tk.LEFT, padx=8)
+ttk.Checkbutton(opts, text="Format số / ngày / chỉ số", variable=special_var).pack(side=tk.LEFT, padx=8)
 
 # Exceptions area
 exceptions_frame = ttk.Labelframe(root, text="Exceptions (từ/cụm không muốn để tool bỏ qua) - phân tách bằng dấu phẩy")
@@ -157,6 +159,7 @@ footer_enable_var.set(1 if cfg.get('include_footer') else 0)
 bullets_var.set(1 if cfg.get('use_bullets', True) else 0)
 exceptions_text.delete("1.0", tk.END)
 exceptions_text.insert("1.0", ', '.join(cfg.get('exceptions', [])))
+special_var.set(1 if cfg.get('format_specials', True) else 0)
 
 # Footer hint
 footer = ttk.Label(root, text="Luật định dạng: Tự động chọn các cụm từ quan trọng và chuyển sang ký tự Unicode để copy/paste lên social. Không format từ tiếng Việt có dấu hoặc cụm tiếng Việt.", anchor="w")
